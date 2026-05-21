@@ -1,0 +1,74 @@
+To build this IT service ticketing tool in OutSystems 11, you will leverage OutSystems Entities (Database Tables), Web Screens (User Interfaces), and Forms / Blocks (Reusable UI components).
+OutSystems automatically generates the standard User entity for you, so you will build your business data model around it.
+------------------------------
+## 🏛️ OutSystems Data Model (Database Entities)
+In OutSystems, tables are called Entities, and columns are called Attributes. You will create the following core entities in your Database layer:
+## 1. Ticket (Entity)
+Stores the core details of every IT request.
+
+* Id (Identifier, Auto-number)
+* Title (Text, Mandatory)
+* Description (Text)
+* StatusId (Static Entity Identifier: New, Open, In Progress, Resolved, Closed)
+* PriorityId (Static Entity Identifier: Low, Medium, High, Critical)
+* ServiceTypeId (Static Entity Identifier: Software, Hardware, Network, IT Support)
+* CategoryId (Category Identifier FK - e.g., Laptop Repair)
+* RequesterUserId (User Identifier FK - automatically linked to OutSystems system User)
+* AssignedAgentUserId (User Identifier FK, Nullable)
+* CreatedOn (DateTime, Default: CurrDateTime())
+* ClosedOn (DateTime)
+
+## 2. Category (Entity)
+A lookup table to organize sub-issues based on the service type.
+
+* Id (Identifier)
+* ServiceTypeId (Static Entity Identifier)
+* Name (Text - e.g., "Password Reset", "OS Installation", "Broken Screen")
+* IsActive (Boolean)
+
+## 3. TicketComment (Entity)
+Tracks communication history and internal notes.
+
+* Id (Identifier)
+* TicketId (Ticket Identifier FK)
+* UserId (User Identifier FK - author of the comment)
+* Message (Text, Mandatory)
+* IsInternalNote (Boolean - True if only visible to IT agents)
+* CreatedOn (DateTime)
+
+## 4. Static Entities (Enums)
+Create these as Static Entities in OutSystems for hardcoded, fast-loading dropdown values:
+
+* TicketStatus: New, Open, In_Progress, Resolved, Closed
+* TicketPriority: Low, Medium, High, Critical
+* ServiceType: Software, Hardware, IT_Support, Network
+
+------------------------------
+## 🖥️ Application Screens (UI Web Screens)
+You will organize your screens into distinct flows. Use Role-based Security in the screen properties to restrict access.
+## 1. End-User Portal Flow (Role: Registered Users)
+
+* EmployeeDashboard: A clean page featuring an aggregate list of "My Active Tickets" and "My Historical Tickets". Includes a prominent button to "Raise a New Ticket".
+* NewTicket: A dedicated page featuring the ticket submission form.
+* UserTicketDetail: A conversation-focused view where the employee can see status updates, read agent replies, and add new comments.
+
+## 2. IT Agent Console Flow (Role: ITAgent)
+
+* AgentQueue: A master dashboard utilizing an OutSystems Table Records widget or a custom Kanban Block to show unassigned tickets, open tickets, and high-priority software/hardware queues.
+* AgentTicketDetail: A robust, split-screen UI. The left side displays user profile details and asset information. The right side features a chat timeline for communication, toggleable tabs for public replies vs. internal agent notes, and a sidebar for shifting ticket metadata.
+
+## 3. Admin Management Flow (Role: ITAdmin)
+
+* AdminDashboard: A metrics view displaying charts (using OutSystems Charts) tracking open tickets by Service Type, average resolution time, and agent workloads.
+* ConfigurationManager: Simple CRUD (Create, Read, Update, Delete) screens to manage sub-categories (e.g., adding a new category under "Hardware").
+
+------------------------------
+## 📝 Essential OutSystems Forms & Blocks
+Use the Form widget in Service Studio to automatically map screen inputs to your Entity variables.
+
+* Form_NewTicket (End-User):
+* Inputs: Title (Input), ServiceTypeId (Dropdown), CategoryId (Dropdown - configured with a Refresh Data action to dynamically filter based on the selected Service Type), Description (TextArea), Attachment (Upload Widget).
+* Form_TicketUpdate (Agent Sidebar):
+* Inputs: StatusId (Dropdown), PriorityId (Dropdown), AssignedAgentUserId (Dropdown populated by a query of users with the ITAgent role).
+* Block_CommentSection (Reusable Component):
+* A custom OutSystems UI Block containing a List Records widget for displaying history and an input layout for typing a response. For agents, it includes a Switch widget mapped to IsInternalNote.

@@ -1,0 +1,333 @@
+# Errors & Debugging Reference
+
+## Error progression: low density → high density
+
+This file covers errors from simplest (beginner makes these) to most complex (expert-level debugging).
+
+---
+
+## Level 1 — Screen & UI Errors (most common, easiest to fix)
+
+### Error: Screen shows blank / no data
+```
+Symptom: List is empty, form shows no values
+Cause: Wrong aggregate filter, wrong input parameter, data not fetched yet
+
+Debug steps:
+  1. Add breakpoint on OnInitialize or Preparation
+  2. Check aggregate: does it have the correct filter?
+  3. Check input parameter: is TicketId actually being passed?
+  4. In Watch panel: inspect aggregate result list — is it empty?
+
+Fix example:
+  Wrong: GetTicket filter → Ticket.Id = TicketId (TicketId is local var not input param)
+  Right: GetTicket filter → Ticket.Id = TicketIdInput (the screen input param)
+```
+
+### Error: "Variable not initialized"
+```
+Symptom: Runtime error on screen
+Cause: Local variable used before being assigned a value
+
+Fix:
+  → Always set default values for local variables
+  → Use NullIdentifier() check before using an Identifier
+  → Initialize list variables with empty list before use
+```
+
+### Error: Navigation passes wrong ID / ID is 0
+```
+Symptom: Edit screen opens but shows wrong ticket or blank form
+Cause: Link/button not passing the correct ID
+
+Fix:
+  Link destination → Input Parameter → check it points to CurrentList.Ticket.Id
+  Not to: 0, NullIdentifier, or a fixed value
+```
+
+### Error: Widget not visible / always hidden
+```
+Symptom: Button or container not showing
+Cause: Visible property set to wrong expression
+
+Debug:
+  → Click the widget → check Visible property expression
+  → Add breakpoint and check the variable the Visible property references
+  → Common mistake: visibility tied to uninitialized boolean variable (defaults to False)
+```
+
+---
+
+## Level 2 — Logic & Action Errors
+
+### Error: "All exception branches must end in End or Raise"
+```
+Symptom: TrueChange error on publish
+Cause: Exception Handler flow has a path that doesn't terminate
+
+Fix:
+  → Every Exception Handler must end in:
+    - End node
+    - Raise exception node
+    - Navigate to screen (for screen actions)
+  → No dangling connections
+```
+
+### Error: Action outputs not reaching caller
+```
+Symptom: Server Action completes but return values are empty/default
+Cause: Output parameters assigned inside an If branch that wasn't executed
+      OR assigned but action ends via a different path
+
+Fix:
+  → Use Assign nodes at ALL paths to set output parameters
+  → Or initialize output params at the START of the action, then override in branches
+```
+
+### Error: For Each loop not iterating
+```
+Symptom: Loop body never executes
+Cause: List passed to For Each is empty
+
+Debug:
+  → Add breakpoint before For Each
+  → Check list variable in Watch panel — is it populated?
+  → Check the aggregate/data fetch that populates the list
+```
+
+### Error: "Transaction rolled back unexpectedly"
+```
+Symptom: DB write succeeds then fails on next operation, all changes lost
+Cause: Unhandled exception in Server Action causes full transaction rollback
+
+Fix:
+  → Add Exception Handler in Server Action
+  → Handle expected exceptions (validation, constraint) explicitly
+  → Use CommitTransaction() after critical writes if needed independently
+```
+
+---
+
+## Level 3 — Integration Errors (REST/SOAP)
+
+### Error: REST call returns data but structure is empty
+```
+Symptom: API call succeeds (200) but response structure fields are all blank
+Cause: JSON field names in response don't match structure attribute names (case-sensitive)
+
+Debug:
+  → Service Center / ODC Portal → Integration Log → view raw response JSON
+  → Compare JSON keys to structure attribute names exactly
+
+Fix:
+  → Use "Name in JSON" property on structure attributes to map different names
+  → Example: JSON returns "ticket_id" but attribute is "TicketId"
+    → Set Name in JSON = "ticket_id"
+```
+
+### Error: SOAP SOAPFaultException
+```
+Symptom: SOAP call throws exception with fault code
+Cause: External SOAP service returned a business or technical error
+
+Fix:
+  → Add specific exception handler for SOAPFaultException
+  → Log fault code and fault message
+  → Map to user-friendly error: "Payment processing failed. Code: " + FaultCode
+  
+  Exception handling code:
+    Catch: SOAPFaultException
+    Log: FaultCode + FaultMessage + Action inputs
+    Raise UserException: "External service error: " + FaultMessage
+```
+
+### Error: REST timeout
+```
+Symptom: Integration call hangs then throws exception after 100 seconds
+Cause: External service is slow, default timeout exceeded
+
+Fix:
+  → Set timeout property on REST method (in properties panel)
+  → Add async pattern for long-running calls:
+    1. Call external API to start job, get job ID
+    2. Store job ID
+    3. Use Timer to poll for completion
+  → Show user a "Processing..." state in the meantime
+```
+
+### Error: WSDL import fails / SOAP structure changes
+```
+Symptom: After vendor updates their service, SOAP calls fail
+Cause: WSDL schema changed — generated structures now mismatch
+
+Fix:
+  Step 1: Download new WSDL file from vendor
+  Step 2: Re-import in Service Studio (Logic → SOAP → right-click → Refresh WSDL)
+  Step 3: Fix any broken references (new/renamed parameters)
+  Step 4: Republish and test
+  → Wrapping SOAP calls in Service Actions means only the wrapper needs updating
+```
+
+---
+
+## Level 4 — SQL & Database Errors
+
+### Error: "Invalid object name" in Advanced SQL
+```
+Symptom: SQL error at runtime — table not found
+Cause: Hardcoded table name instead of {Entity} syntax
+
+Wrong: SELECT * FROM Ticket WHERE Id = @Id
+Right: SELECT * FROM {Ticket} WHERE {Ticket}.[Id] = @Id
+
+Note: OutSystems translates {Ticket} to the real physical table name (OSUSR_xxx_Ticket)
+```
+
+### Error: Aggregate returns no rows despite data existing
+```
+Symptom: List comes back empty, but data is definitely in the database
+Cause: Filter is too restrictive, or uses wrong variable, or NullIdentifier issue
+
+Debug steps:
+  1. Temporarily remove all filters → do you get data?
+  2. Add filters back one by one
+  3. Check: IsNullOrEmpty() on filter variables — if filter param is empty/null,
+     the filter may exclude everything
+  4. Use Service Center SQL log to see actual SQL executed
+
+NullIdentifier filter trap:
+  Wrong: Ticket.AssignedTo = UserId (if UserId is NullIdentifier → matches nothing)
+  Fix:   If UserId = NullIdentifier() → don't apply that filter at all
+```
+
+### Error: SQL Injection attempt detected
+```
+Symptom: User enters malicious input, data is exposed or corrupted
+Cause: String concatenation in Advanced SQL
+
+What the attack looks like:
+  User inputs: ' OR '1'='1
+  SQL becomes: WHERE Name = '' OR '1'='1'  → returns ALL records
+  
+  User inputs: '; DROP TABLE OSUSR_xxx_Ticket; --
+  SQL becomes: WHERE Name = ''; DROP TABLE... → deletes table
+
+Prevention checklist:
+  1. Never use + operator with user input in SQL strings
+  2. Always use @InputParameter for user-supplied values
+  3. Use EncodeSql() for any dynamic text that must be concatenated
+  4. Use Aggregates where possible — they are always safe
+  5. Regular security testing with OWASP ZAP or similar tool
+```
+
+### Error: "Unique constraint violation"
+```
+Symptom: CreateTicket fails with database error
+Cause: Trying to insert a duplicate value in a unique field
+
+Fix:
+  Option A: Check before insert
+    → Aggregate: GetTicketByNumber(TicketNumber)
+    → If count > 0 → raise "Ticket number already exists"
+    → Else → CreateTicket
+
+  Option B: Handle the exception
+    → Catch DatabaseException
+    → Check exception message for "unique constraint" or "duplicate key"
+    → Raise UserException: "That ticket number is already in use"
+```
+
+---
+
+## Level 5 — Advanced / Architecture-Level Errors
+
+### Error: Circular dependency between modules
+```
+Symptom: TrueChange error — "A module cannot reference its own consumer"
+Cause: Module A references Module B, which references Module A (directly or indirectly)
+
+Fix:
+  Step 1: Identify the circular path using Architecture Dashboard
+  Step 2: Extract the shared logic into a Core or Foundation module
+  Step 3: Both A and B reference the new lower-level module
+  Step 4: Remove the circular reference
+
+Example:
+  TicketWeb references TicketCore
+  TicketCore accidentally references TicketWeb
+  Fix: Move shared elements from TicketWeb into TicketCore
+```
+
+### Error: Module has outdated consumer references
+```
+Symptom: After changing a Service Action signature, consumers show broken reference
+Cause: Consumer module was not refreshed after producer changed its public contract
+
+Fix:
+  → Consumer module → Manage Dependencies → Refresh producer
+  → Fix any broken input/output parameter mappings
+  → Republish consumer module
+  → Use Impact Analysis in LifeTime before making breaking changes
+```
+
+### Error: Performance — screen loads slowly
+```
+Symptom: Screen takes 3-5+ seconds to load
+Cause: Multiple aggregates loading in sequence, heavy joins, no indexes
+
+Debugging approach:
+  1. Service Center → Monitoring → General Log → filter by screen URL → check duration
+  2. Check how many aggregates run on screen load
+  3. Look for N+1 pattern: aggregate inside a For Each loop (loads N times)
+
+Fixes:
+  - Merge multiple aggregates into one with joins
+  - Use pagination (MaxRecords on aggregate)
+  - Cache frequently-read static data (Static Entities or Site Property)
+  - Add database index on commonly filtered attributes
+  - Move heavy logic to a Timer if not needed immediately
+```
+
+### Error: ODC Service Action — partial data committed
+```
+Symptom: Some data saved, some not — inconsistent state in database
+Cause: ODC Service Actions run in own transaction — not rolled back by caller's failure
+
+Fix (compensating transaction pattern):
+  Step 1: Call AssignTicket (Service Action) → commits
+  Step 2: If subsequent step fails → call UnassignTicket (compensating action)
+  Step 3: OR use a Saga pattern: track state, resume/rollback in Timer
+
+This is a fundamental ODC vs O11 difference — design around it explicitly.
+```
+
+---
+
+## Debugging Checklist (use for any error)
+
+```
+1. What layer is the error in?
+   Screen → check widget visibility, input params, navigation
+   Action → check logic flow, variable assignment, exception handlers
+   Data → check aggregate filters, entity attributes, SQL syntax
+   Integration → check request/response in Integration Log
+
+2. Where exactly does it fail?
+   → Add breakpoints progressively closer to the suspect area
+   → Read the full error message and stack trace
+
+3. What is the variable state at the point of failure?
+   → Use Watch panel in Service Studio debugger
+   → Or add LogMessage() to write variable values to General Log
+
+4. Can I reproduce it consistently?
+   → If yes → deterministic bug → trace back through logic
+   → If no → intermittent → check for timing/concurrency or external dependency
+
+5. Did something change recently?
+   → New publish? → compare with previous version in Factory
+   → External service change? → check Integration Log for different responses
+   → Data volume increase? → performance-related
+
+6. Check Service Center / ODC Portal logs FIRST before guessing
+```
